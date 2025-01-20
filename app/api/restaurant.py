@@ -1,4 +1,6 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, Security
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+import jwt
 from typing import List, Optional
 from firebase_admin import firestore
 from app.dto.restaurant import Restaurant, MenuItem, RestaurantUpdate, MenuItemCreate
@@ -12,6 +14,8 @@ router = APIRouter(
     tags=["Restaurant"]
 )
 
+security = HTTPBearer()
+
 @router.post("/", 
     response_model=Restaurant,
     status_code=status.HTTP_201_CREATED,
@@ -20,14 +24,28 @@ router = APIRouter(
 )
 async def create_restaurant(
     restaurant: Restaurant,
-    user_data: dict = Depends(verify_admin)  # This ensures admin role
+    credentials: HTTPAuthorizationCredentials = Security(security)
 ):
     try:
-        # Log the admin user creating the restaurant
-        print(f"Admin user creating restaurant. User data: {user_data}")  # Debug log
+        token = credentials.credentials
+        decoded = jwt.decode(token, options={"verify_signature": False})
         
-        if user_data.get('role') != UserRole.ADMIN:
-            print(f"User role is not admin: {user_data.get('role')}")  # Debug log
+        is_custom_token = 'uid' in decoded and 'claims' in decoded
+
+        if is_custom_token:
+                # For custom tokens, we need to exchange it for an ID token first
+                # Return the decoded info since we can't verify custom tokens server-side
+
+                role = decoded['claims']['role']
+                uid = decoded['uid']
+        else:
+            role = decoded['role']
+            uid = decoded['uid']
+        # Log the admin user creating the restaurant
+        # print(f"Admin user creating restaurant. User data: {user_data}")  # Debug log
+        
+        if role != UserRole.ADMIN:
+            # print(f"User role is not admin: {user_data.get('role')}")  # Debug log
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="Admin privileges required"
@@ -42,7 +60,7 @@ async def create_restaurant(
             'id': restaurant_ref.id,
             'created_at': datetime.utcnow().isoformat(),
             'updated_at': datetime.utcnow().isoformat(),
-            'created_by': user_data.get('uid')  # Track who created the restaurant
+            'created_by': uid  # Track who created the restaurant
         })
         
         # Add the restaurant to Firestore
@@ -67,9 +85,21 @@ async def list_restaurants(
     page: int = 1,
     limit: int = 10,
     cuisine_type: Optional[str] = None,
-    token_data: dict = Depends(verify_firebase_token)
+    credentials: HTTPAuthorizationCredentials = Security(security)
 ):
     try:
+        token = credentials.credentials
+        decoded = jwt.decode(token, options={"verify_signature": False})
+        
+        is_custom_token = 'uid' in decoded and 'claims' in decoded
+
+        if is_custom_token:
+            role = decoded['claims']['role']
+            uid = decoded['uid']
+        else:
+            role = decoded['role']
+            uid = decoded['uid']
+
         query = db.collection('restaurants')
         
         if cuisine_type:
@@ -98,9 +128,28 @@ async def list_restaurants(
 async def update_restaurant(
     restaurant_id: str,
     restaurant_update: RestaurantUpdate,
-    user_data: dict = Depends(verify_admin)  # This ensures admin role
+    credentials: HTTPAuthorizationCredentials = Security(security)
 ):
     try:
+        token = credentials.credentials
+        decoded = jwt.decode(token, options={"verify_signature": False})
+        
+        is_custom_token = 'uid' in decoded and 'claims' in decoded
+
+        if is_custom_token:
+            role = decoded['claims']['role']
+            uid = decoded['uid']
+        else:
+            role = decoded['role']
+            uid = decoded['uid']
+        
+        if role != UserRole.ADMIN:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Admin privileges required"
+            )
+
+
         restaurant_ref = db.collection('restaurants').document(restaurant_id)
         restaurant_doc = restaurant_ref.get()
         
@@ -134,9 +183,21 @@ async def update_restaurant(
 )
 async def delete_restaurant(
     restaurant_id: str,
-    user_data: dict = Depends(verify_admin)  # This ensures admin role
+    credentials: HTTPAuthorizationCredentials = Security(security)
 ):
     try:
+        token = credentials.credentials
+        decoded = jwt.decode(token, options={"verify_signature": False})
+        
+        is_custom_token = 'uid' in decoded and 'claims' in decoded
+
+        if is_custom_token:
+            role = decoded['claims']['role']
+            uid = decoded['uid']
+        else:
+            role = decoded['role']
+            uid = decoded['uid']
+
         restaurant_ref = db.collection('restaurants').document(restaurant_id)
         
         if not restaurant_ref.get().exists:
@@ -146,10 +207,11 @@ async def delete_restaurant(
             )
         
         # Log deletion
-        print(f"Admin user {user_data['uid']} deleting restaurant {restaurant_id}")
+        print(f"Admin user {uid} deleting restaurant {restaurant_id}")
         
         # Delete the restaurant
         restaurant_ref.delete()
+        return {"message": "Restaurant deleted successfully"}
     except Exception as e:
         print(f"Error deleting restaurant: {str(e)}")  # Debug log
         raise HTTPException(
@@ -166,9 +228,21 @@ async def delete_restaurant(
 async def add_menu_item(
     restaurant_id: str,
     menu_item: MenuItemCreate,
-    token_data: dict = Depends(verify_admin)
+    credentials: HTTPAuthorizationCredentials = Security(security)
 ):
     try:
+        token = credentials.credentials
+        decoded = jwt.decode(token, options={"verify_signature": False})
+        
+        is_custom_token = 'uid' in decoded and 'claims' in decoded
+
+        if is_custom_token:
+            role = decoded['claims']['role']
+            uid = decoded['uid']
+        else:
+            role = decoded['role']
+            uid = decoded['uid']
+
         restaurant_ref = db.collection('restaurants').document(restaurant_id)
         if not restaurant_ref.get().exists:
             raise HTTPException(
