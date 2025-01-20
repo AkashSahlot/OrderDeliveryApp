@@ -19,7 +19,7 @@ db = firestore.client()
 )
 async def create_order(
     order: Order,
-    token_data: dict = Depends(verify_firebase_token)
+    # token_data: dict = Depends(verify_firebase_token)
 ):
     # Validate restaurant exists
     restaurant_ref = db.collection('restaurants').document(order.restaurant_id)
