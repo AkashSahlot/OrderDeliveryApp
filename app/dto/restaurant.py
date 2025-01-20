@@ -13,7 +13,6 @@ class MenuItem(BaseModel):
     name: str
     description: str
     price: float
-    category: MenuCategory
     is_available: bool = True
     image_url: Optional[HttpUrl] = None
 
