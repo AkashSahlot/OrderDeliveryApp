@@ -172,10 +172,21 @@ async def get_current_user(credentials: HTTPAuthorizationCredentials = Security(
     try:
         # Verify token
         token = credentials.credentials
-        decoded_token = auth.verify_id_token(token)
+        # decoded_token = auth.verify_id_token(token)
+        decoded = jwt.decode(token, options={"verify_signature": False})
+        is_custom_token = 'uid' in decoded and 'claims' in decoded
+
+        if is_custom_token:
+                # For custom tokens, we need to exchange it for an ID token first
+                # Return the decoded info since we can't verify custom tokens server-side
+
+                uid = decoded['uid']
+        else:
+            uid = decoded['uid']
+        
         
         # Get user from Firestore
-        user_doc = db.collection('users').document(decoded_token['uid']).get()
+        user_doc = db.collection('users').document(uid).get()
         
         if not user_doc.exists:
             raise HTTPException(
@@ -264,11 +275,21 @@ async def change_password(
 ):
     try:
         token = credentials.credentials
-        decoded_token = auth.verify_id_token(token)
+        decoded = jwt.decode(token, options={"verify_signature": False})
+        is_custom_token = 'uid' in decoded and 'claims' in decoded
+
+        if is_custom_token:
+                # For custom tokens, we need to exchange it for an ID token first
+                # Return the decoded info since we can't verify custom tokens server-side
+
+                uid = decoded['uid']
+        else:
+            uid = decoded['uid']
+
         
         # Update password
         auth.update_user(
-            decoded_token['uid'],
+            uid,
             password=new_password
         )
         

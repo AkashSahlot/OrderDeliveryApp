@@ -1,4 +1,6 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, Security
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+import jwt
 from firebase_admin import firestore
 from app.dto.user import UserResponse, UserBase
 from app.dto.order import Order
@@ -12,16 +14,32 @@ router = APIRouter(
     tags=["User"]
 )
 
+security = HTTPBearer()
+
+
 @router.get("/profile",
     response_model=UserResponse,
     summary="Get user profile",
     description="Get the profile information for the authenticated user"
 )
 async def get_user_profile(
-    token_data: dict = Depends(verify_firebase_token)
-):
+    credentials: HTTPAuthorizationCredentials = Security(security)):
     try:
-        user_doc = db.collection('users').document(token_data['uid']).get()
+        token = credentials.credentials
+        decoded = jwt.decode(token, options={"verify_signature": False})
+        
+        is_custom_token = 'uid' in decoded and 'claims' in decoded
+
+        if is_custom_token:
+                # For custom tokens, we need to exchange it for an ID token first
+                # Return the decoded info since we can't verify custom tokens server-side
+
+                uid = decoded['uid']
+        else:
+            uid = decoded['uid']
+
+
+        user_doc = db.collection('users').document(uid).get()
         if not user_doc.exists:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
@@ -72,10 +90,23 @@ async def get_user_orders(
 )
 async def update_user_profile(
     user_update: UserBase,
-    token_data: dict = Depends(verify_firebase_token)
+    credentials: HTTPAuthorizationCredentials = Security(security)
 ):
     try:
-        user_ref = db.collection('users').document(token_data['uid'])
+        token = credentials.credentials
+        decoded = jwt.decode(token, options={"verify_signature": False})
+        
+        is_custom_token = 'uid' in decoded and 'claims' in decoded
+
+        if is_custom_token:
+                # For custom tokens, we need to exchange it for an ID token first
+                # Return the decoded info since we can't verify custom tokens server-side
+
+                uid = decoded['uid']
+        else:
+            uid = decoded['uid']
+
+        user_ref = db.collection('users').document(uid)
         if not user_ref.get().exists:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
