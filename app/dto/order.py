@@ -17,11 +17,8 @@ class OrderItem(BaseModel):
 
 class Order(BaseModel):
     id: Optional[str] = None
-    user_id: str
     restaurant_id: str
     items: List[OrderItem]
-    total: float
     delivery_address: str
     status: OrderStatus = OrderStatus.PLACED
-    created_at: Optional[datetime] = None
-    updated_at: Optional[datetime] = None
+    
