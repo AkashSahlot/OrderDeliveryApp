@@ -9,6 +9,11 @@ from app.core.firebase import initialize_firebase, db
 from google.cloud import firestore
 from datetime import datetime
 import jwt
+from dotenv import load_dotenv
+import os
+
+# Load the .env file
+load_dotenv()
 
 # Initialize Firebase
 initialize_firebase()
@@ -24,71 +29,44 @@ security = HTTPBearer()
 async def verify_firebase_token(credentials: HTTPAuthorizationCredentials = Security(security)):
     try:
         token = credentials.credentials
-        print(f"Verifying token: {token[:50]}...")  # Debug log
+        decoded_token = auth.verify_id_token(token)
         
-        try:
-            # Verify the Firebase ID token
-            decoded_token = auth.verify_id_token(token)
-            print(f"Decoded token: {decoded_token}")  # Debug log
-            
-            # Get user data from Firestore
-            user_doc = db.collection('users').document(decoded_token['uid']).get()
-            if not user_doc.exists:
-                raise HTTPException(
-                    status_code=status.HTTP_404_NOT_FOUND,
-                    detail="User not found in database"
-                )
-            
-            user_data = user_doc.to_dict()
-            print(f"User data: {user_data}")  # Debug log
-            
-            return decoded_token
-            
-        except auth.InvalidIdTokenError:
-            print("Invalid token format")  # Debug log
+        # Get user data from Firestore
+        user_doc = db.collection('users').document(decoded_token['uid']).get()
+        if not user_doc.exists:
             raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Invalid token format"
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="User not found in database"
             )
-        except Exception as e:
-            print(f"Token verification error: {str(e)}")  # Debug log
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail=f"Token verification failed: {str(e)}"
-            )
+        
+        user_data = user_doc.to_dict()
+        # Add role and email to token data
+        decoded_token.update({
+            'role': user_data.get('role', UserRole.USER),
+            'email': user_data.get('email')
+        })
+        
+        print(f"Token data after update: {decoded_token}")  # Debug log
+        return decoded_token
     except Exception as e:
-        print(f"Authorization error: {str(e)}")  # Debug log
+        print(f"Error in verify_firebase_token: {str(e)}")  # Debug log
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid authorization header"
+            detail=str(e)
         )
 
 async def verify_admin(token_data: dict = Depends(verify_firebase_token)):
     try:
-        # Get user from Firestore
-        user_doc = db.collection('users').document(token_data['uid']).get()
+        print(f"Checking admin privileges for token data: {token_data}")  # Debug log
         
-        if not user_doc.exists:
-            print(f"User not found in Firestore: {token_data['uid']}")  # Debug log
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="User not found"
-            )
-        
-        user_data = user_doc.to_dict()
-        print(f"User data from Firestore: {user_data}")  # Debug log
-        
-        # Check if user has admin role
-        if user_data.get('role') != UserRole.ADMIN:
-            print(f"User role is not admin: {user_data.get('role')}")  # Debug log
+        if token_data.get('role') != UserRole.ADMIN:
+            print(f"User role is not admin: {token_data.get('role')}")  # Debug log
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="Admin privileges required"
             )
-            
-        return user_data  # Return full user data instead of just token_data
-    except HTTPException as e:
-        raise e
+        
+        return token_data
     except Exception as e:
         print(f"Error in verify_admin: {str(e)}")  # Debug log
         raise HTTPException(
@@ -134,19 +112,37 @@ async def register_user(user: UserRegister):
 @router.post("/login",
     response_model=dict,
     summary="Login user",
-    description="Login with email and password to get Firebase token"
+    description="Login with email and password"
 )
 async def login_user(user: UserLogin):
     try:
         # Get user by email
         user_record = auth.get_user_by_email(user.email)
         
-        # Create custom token
-        custom_token = auth.create_custom_token(user_record.uid)
-        
         # Get user data from Firestore
         user_doc = db.collection('users').document(user_record.uid).get()
+        if not user_doc.exists:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="User not found in database"
+            )
+        
         user_data = user_doc.to_dict()
+        
+        # Set custom claims for role
+        claims = {
+            'role': user_data.get('role', UserRole.USER),
+            'admin': user_data.get('role') == UserRole.ADMIN,
+            'email': user.email
+        }
+        
+        print(f"Setting custom claims: {claims}")  # Debug log
+        
+        # Update Firebase user custom claims
+        auth.set_custom_user_claims(user_record.uid, claims)
+        
+        # Create custom token
+        custom_token = auth.create_custom_token(user_record.uid, claims)
         
         return {
             "message": "Login successful",
@@ -155,11 +151,16 @@ async def login_user(user: UserLogin):
             "role": user_data.get('role'),
             "token": custom_token.decode('utf-8')
         }
-    except Exception as e:
-        print(f"Login error: {str(e)}")
+    except auth.UserNotFoundError:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail=str(e)
+            detail="Invalid email or password"
+        )
+    except Exception as e:
+        print(f"Login error: {str(e)}")  # Debug log
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid email or password"
         )
 
 @router.get("/me",
@@ -294,14 +295,31 @@ async def debug_token(credentials: HTTPAuthorizationCredentials = Security(secur
         except Exception as e:
             print("JWT decode error:", str(e))
         
-        # Now try Firebase verification
+        # Check if it's a custom token (has 'uid' and 'claims' fields)
+        is_custom_token = 'uid' in decoded and 'claims' in decoded
+        
         try:
-            decoded_token = auth.verify_id_token(token)
-            print("Firebase decoded token:", decoded_token)
-            return {"message": "Token is valid", "decoded": decoded_token}
+            if is_custom_token:
+                # For custom tokens, we need to exchange it for an ID token first
+                # Return the decoded info since we can't verify custom tokens server-side
+                return {
+                    "message": "Custom token detected",
+                    "decoded": decoded,
+                    "note": "Custom tokens must be exchanged for ID tokens using Firebase client SDK"
+                }
+            else:
+                # Try Firebase verification for ID tokens
+                decoded_token = auth.verify_id_token(token)
+                print("Firebase decoded token:", decoded_token)
+                return {"message": "ID token is valid", "decoded": decoded_token}
+                
         except Exception as e:
-            print("Firebase verification error:", str(e))
-            return {"message": "Token verification failed", "error": str(e)}
+            print("Token verification error:", str(e))
+            return {
+                "message": "Token verification failed",
+                "error": str(e),
+                "token_type": "custom" if is_custom_token else "id"
+            }
             
     except Exception as e:
         print("General error:", str(e))

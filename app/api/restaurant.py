@@ -5,6 +5,7 @@ from app.dto.restaurant import Restaurant, MenuItem, RestaurantUpdate, MenuItemC
 from app.api.firebase_authentication import verify_firebase_token, verify_admin
 from app.core.firebase import db
 from datetime import datetime
+from app.dto.user import UserRole
 
 router = APIRouter(
     prefix="/restaurants",
@@ -23,7 +24,14 @@ async def create_restaurant(
 ):
     try:
         # Log the admin user creating the restaurant
-        print(f"Admin user creating restaurant: {user_data}")
+        print(f"Admin user creating restaurant. User data: {user_data}")  # Debug log
+        
+        if user_data.get('role') != UserRole.ADMIN:
+            print(f"User role is not admin: {user_data.get('role')}")  # Debug log
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Admin privileges required"
+            )
         
         # Create a new document reference
         restaurant_ref = db.collection('restaurants').document()
@@ -34,13 +42,15 @@ async def create_restaurant(
             'id': restaurant_ref.id,
             'created_at': datetime.utcnow().isoformat(),
             'updated_at': datetime.utcnow().isoformat(),
-            'created_by': user_data['uid']  # Track who created the restaurant
+            'created_by': user_data.get('uid')  # Track who created the restaurant
         })
         
         # Add the restaurant to Firestore
         restaurant_ref.set(restaurant_dict)
         
         return restaurant_dict
+    except HTTPException as e:
+        raise e
     except Exception as e:
         print(f"Error creating restaurant: {str(e)}")  # Debug log
         raise HTTPException(
