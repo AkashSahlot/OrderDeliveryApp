@@ -52,36 +52,7 @@ async def get_user_profile(
             detail=str(e)
         )
 
-@router.get("/orders",
-    response_model=List[Order],
-    summary="Get user orders",
-    description="Get order history for the authenticated user"
-)
-async def get_user_orders(
-    token_data: dict = Depends(verify_firebase_token),
-    limit: int = 10,
-    offset: int = 0
-):
-    try:
-        orders = []
-        query = (
-            db.collection('orders')
-            .where('user_id', '==', token_data['uid'])
-            .order_by('created_at', direction='DESCENDING')
-            .limit(limit)
-            .offset(offset)
-        )
-        
-        for doc in query.stream():
-            order_data = doc.to_dict()
-            orders.append(order_data)
-            
-        return orders
-    except Exception as e:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=str(e)
-        )
+
 
 @router.put("/profile",
     response_model=UserResponse,
@@ -125,14 +96,3 @@ async def update_user_profile(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=str(e)
         )
-
-@router.post("/orders",
-    response_model=dict,
-    summary="Create user order",
-    description="Create a new order for the authenticated user"
-)
-async def create_order(
-    order: Order,
-    token_data: dict = Depends(verify_firebase_token)
-):
-    return {"message": "Order created successfully", "order_id": "123"}
