@@ -41,23 +41,25 @@ Create a `.env` file in the root directory:
 FIREBASE_PROJECT_ID=your-project-id
 
 ## Project Structure
+```plaintext
 app/
 ├── api/
-│ ├── firebase_authentication.py
-│ ├── restaurant.py
-│ ├── user.py
-│ └── home.py
+│   ├── firebase_authentication.py
+│   ├── restaurant.py
+│   ├── user.py
+│   └── home.py
 ├── core/
-│ └── firebase.py
+│   └── firebase.py
 ├── dto/
-│ ├── restaurant.py
-│ └── user.py
+│   ├── restaurant.py
+│   └── user.py
 ├── middleware/
-│ ├── auth_middleware.py
-│ ├── admin_logging.py
-│ └── error_middleware.py
+│   ├── auth_middleware.py
+│   ├── admin_logging.py
+│   └── error_middleware.py
 ├── service-account.json
 └── main.py
+```
 
 
 ## Running the Application
