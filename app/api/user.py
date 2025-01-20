@@ -1,0 +1,107 @@
+from fastapi import APIRouter, Depends, HTTPException, status
+from firebase_admin import firestore
+from app.dto.user import UserResponse, UserBase
+from app.dto.order import Order
+from app.api.firebase_authentication import verify_firebase_token
+from typing import List
+from datetime import datetime
+from app.core.firebase import db  # Import the Firestore client
+
+router = APIRouter(
+    prefix="/users",
+    tags=["User"]
+)
+
+@router.get("/profile",
+    response_model=UserResponse,
+    summary="Get user profile",
+    description="Get the profile information for the authenticated user"
+)
+async def get_user_profile(
+    token_data: dict = Depends(verify_firebase_token)
+):
+    try:
+        user_doc = db.collection('users').document(token_data['uid']).get()
+        if not user_doc.exists:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="User not found"
+            )
+        return user_doc.to_dict()
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=str(e)
+        )
+
+@router.get("/orders",
+    response_model=List[Order],
+    summary="Get user orders",
+    description="Get order history for the authenticated user"
+)
+async def get_user_orders(
+    token_data: dict = Depends(verify_firebase_token),
+    limit: int = 10,
+    offset: int = 0
+):
+    try:
+        orders = []
+        query = (
+            db.collection('orders')
+            .where('user_id', '==', token_data['uid'])
+            .order_by('created_at', direction='DESCENDING')
+            .limit(limit)
+            .offset(offset)
+        )
+        
+        for doc in query.stream():
+            order_data = doc.to_dict()
+            orders.append(order_data)
+            
+        return orders
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=str(e)
+        )
+
+@router.put("/profile",
+    response_model=UserResponse,
+    summary="Update user profile",
+    description="Update the profile information for the authenticated user"
+)
+async def update_user_profile(
+    user_update: UserBase,
+    token_data: dict = Depends(verify_firebase_token)
+):
+    try:
+        user_ref = db.collection('users').document(token_data['uid'])
+        if not user_ref.get().exists:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="User not found"
+            )
+        
+        update_data = user_update.dict(exclude_unset=True)
+        update_data['updated_at'] = datetime.utcnow().isoformat()
+        
+        user_ref.update(update_data)
+        
+        updated_user = user_ref.get().to_dict()
+        return updated_user
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=str(e)
+        )
+
+@router.post("/orders",
+    response_model=dict,
+    summary="Create user order",
+    description="Create a new order for the authenticated user"
+)
+async def create_order(
+    order: Order,
+    token_data: dict = Depends(verify_firebase_token)
+):
+    return {"message": "Order created successfully", "order_id": "123"}
